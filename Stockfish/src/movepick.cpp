@@ -35,9 +35,9 @@ enum Stages {
     MAIN_TT,
     CAPTURE_INIT,
     GOOD_CAPTURE,
+    BAD_CAPTURE,
     QUIET_INIT,
     GOOD_QUIET,
-    BAD_CAPTURE,
     BAD_QUIET,
 
     // generate evasion moves
@@ -219,9 +219,17 @@ top:
     case MAIN_TT :
     case EVASION_TT :
     case QSEARCH_TT :
-    case PROBCUT_TT :
+    case PROBCUT_TT : {
         ++stage;
-        return ttMove;
+        MoveList<CAPTURES> ml(pos);
+        bool               hasCaptures     = ml.size() > 0;
+        bool               ttMoveIsCapture = ttMove != Move::none() && pos.capture(ttMove);
+
+        // Only return TT move if it's a capture or no captures exist
+        if (!hasCaptures || ttMoveIsCapture)
+            return ttMove;
+        goto top;
+    }
 
     case CAPTURE_INIT :
     case PROBCUT_INIT :
@@ -237,18 +245,33 @@ top:
     }
 
     case GOOD_CAPTURE :
-        if (select([&]() {
-                if (pos.see_ge(*cur, -cur->value / 18))
-                    return true;
-                std::swap(*endBadCaptures++, *cur);
-                return false;
-            }))
+        if (select([]() { return true; }))
+        {
             return *(cur - 1);
+        }
 
+        // if (cur < endCur) {
+        //     return *cur;
+        // }
         ++stage;
         [[fallthrough]];
 
-    case QUIET_INIT :
+    case BAD_CAPTURE :
+        if (select([]() { return true; }))
+        {
+            return *(cur - 1);
+        }
+
+        // Prepare the pointers to loop over quiets again
+        cur    = endCaptures;
+        endCur = endGenerated;
+        ++stage;
+        [[fallthrough]];
+
+    case QUIET_INIT : {
+        MoveList<CAPTURES> ml(pos);
+        bool               hasCaptures = ml.size() > 0;
+        skipQuiets                     = skipQuiets || hasCaptures;
         if (!skipQuiets)
         {
             MoveList<QUIETS> ml(pos);
@@ -260,6 +283,7 @@ top:
 
         ++stage;
         [[fallthrough]];
+    }
 
     case GOOD_QUIET :
         if (!skipQuiets && select([&]() { return cur->value > goodQuietThreshold; }))
@@ -268,17 +292,6 @@ top:
         // Prepare the pointers to loop over the bad captures
         cur    = moves;
         endCur = endBadCaptures;
-
-        ++stage;
-        [[fallthrough]];
-
-    case BAD_CAPTURE :
-        if (select([]() { return true; }))
-            return *(cur - 1);
-
-        // Prepare the pointers to loop over quiets again
-        cur    = endCaptures;
-        endCur = endGenerated;
 
         ++stage;
         [[fallthrough]];
