@@ -28,6 +28,7 @@
 #include <string>
 
 #include "bitboard.h"
+#include "movegen.h"
 #include "types.h"
 
 namespace Stockfish {
@@ -129,6 +130,7 @@ class Position {
     bool  pseudo_legal(const Move m) const;
     bool  capture(Move m) const;
     bool  capture_stage(Move m) const;
+    bool  has_capture_moves() const;
     bool  gives_check(Move m) const;
     Piece moved_piece(Move m) const;
     Piece captured_piece() const;
@@ -338,6 +340,13 @@ inline bool Position::capture(Move m) const {
 inline bool Position::capture_stage(Move m) const {
     assert(m.is_ok());
     return capture(m) || m.promotion_type() == QUEEN;
+}
+
+inline bool Position::has_capture_moves() const {
+    for (auto move : MoveList<LEGAL>(*this))
+        if (capture_stage(move))
+            return true;
+    return false;
 }
 
 inline Piece Position::captured_piece() const { return st->capturedPiece; }

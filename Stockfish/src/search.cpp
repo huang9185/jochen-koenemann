@@ -790,6 +790,13 @@ Value Search::Worker::search(
         }
     }
 
+    bool is_capture_mandatory = pos.has_capture_moves();
+
+    // deeper if has capture
+    if (is_capture_mandatory && depth < MAX_PLY - 2)
+        depth++;
+
+
     // Step 6. Static evaluation of the position
     Value      unadjustedStaticEval = VALUE_NONE;
     const auto correctionValue      = correction_value(*this, pos, ss);
@@ -854,11 +861,14 @@ Value Search::Worker::search(
     // Step 7. Razoring
     // If eval is really low, skip search entirely and return the qsearch value.
     // For PvNodes, we must have a guard against mates being returned.
-    if (!PvNode && eval < alpha - 485 - 281 * depth * depth)
+    // disabled since forced capture by opponent can bring value back up
+    if (!PvNode && !is_capture_mandatory && eval < alpha - 485 - 281 * depth * depth)
         return qsearch<NonPV>(pos, ss, alpha, beta);
 
     // Step 8. Futility pruning: child node
     // The depth condition is important for mate finding.
+    // disabled cuz can't make quiet moves if capture available
+    if (!is_capture_mandatory)
     {
         auto futility_margin = [&](Depth d) {
             Value futilityMult = 76 - 23 * !ss->ttHit;
@@ -875,8 +885,9 @@ Value Search::Worker::search(
     }
 
     // Step 9. Null move search with verification search
-    if (cutNode && ss->staticEval >= beta - 18 * depth + 350 && !excludedMove
-        && pos.non_pawn_material(us) && ss->ply >= nmpMinPly && !is_loss(beta))
+    // disabled cuz can lead to states that's impossible 
+    if (!is_capture_mandatory && cutNode && ss->staticEval >= beta - 18 * depth + 350
+        && !excludedMove && pos.non_pawn_material(us) && ss->ply >= nmpMinPly && !is_loss(beta))
     {
         assert((ss - 1)->currentMove != Move::null());
 
@@ -915,13 +926,16 @@ Value Search::Worker::search(
     // Step 10. Internal iterative reductions
     // At sufficient depth, reduce depth for PV/Cut nodes without a TTMove.
     // (*Scaler) Making IIR more aggressive scales poorly.
-    if (!allNode && depth >= 6 && !ttData.move && priorReduction <= 3)
+    // disabled cuz extra depth helps evalute force capture positions and shouldn't reduce depth
+    if (!allNode && depth >= 6 && !ttData.move && priorReduction <= 3 && !is_capture_mandatory)
         depth--;
 
     // Step 11. ProbCut
     // If we have a good enough capture (or queen promotion) and a reduced search
     // returns a value much above beta, we can (almost) safely prune the previous move.
-    probCutBeta = beta + 235 - 63 * improving;
+    // tighter margin needed in case of recapture from opponent
+    // tunable
+    probCutBeta = beta + (is_capture_mandatory ? 180 : 235) - 63 * improving;
     if (depth >= 3
         && !is_decisive(beta)
         // If value from transposition table is lower than probCutBeta, don't attempt
@@ -999,6 +1013,12 @@ moves_loop:  // When in check, search starts here
         if (!pos.legal(move))
             continue;
 
+        // prune
+        if (is_capture_mandatory && !pos.capture_stage(move))
+        {
+            continue;
+        }
+
         // At root obey the "searchmoves" option and skip moves not listed in Root
         // Move List. In MultiPV mode we also skip PV moves that have been already
         // searched and those of lower "TB rank" if we are in a TB root position.
@@ -1037,7 +1057,10 @@ moves_loop:  // When in check, search starts here
         if (!rootNode && pos.non_pawn_material(us) && !is_loss(bestValue))
         {
             // Skip quiet moves if movecount exceeds our FutilityMoveCount threshold
-            if (moveCount >= (3 + depth * depth) / (2 - improving))
+            // need higher threshold since moves are captures, can't assume bad
+            // tunable
+            if (moveCount >= (is_capture_mandatory ? (5 + depth * depth) : (3 + depth * depth))
+                               / (2 - improving))
                 mp.skip_quiet_moves();
 
             // Reduced depth of the next LMR search
@@ -1049,7 +1072,8 @@ moves_loop:  // When in check, search starts here
                 int   captHist = captureHistory[movedPiece][move.to_sq()][type_of(capturedPiece)];
 
                 // Futility pruning for captures
-                if (!givesCheck && lmrDepth < 7)
+                // bad capture can lead to good forced sequence, should search
+                if (!givesCheck && lmrDepth < 7 && !is_capture_mandatory)
                 {
                     Value futilityValue = ss->staticEval + 232 + 217 * lmrDepth
                                         + PieceValue[capturedPiece] + 131 * captHist / 1024;
@@ -1060,7 +1084,11 @@ moves_loop:  // When in check, search starts here
 
                 // SEE based pruning for captures and checks
                 // Avoid pruning sacrifices of our last piece for stalemate
-                int margin = std::max(166 * depth + captHist / 29, 0);
+                // less prune since opponent can be forced into captures
+                // tunable
+                int margin = is_capture_mandatory ? std::max(120 * depth + captHist / 35, 0)
+                                                  :  // Reduced margin
+                               std::max(166 * depth + captHist / 29, 0);
                 if ((alpha >= VALUE_DRAW || pos.non_pawn_material(us) != PieceValue[movedPiece])
                     && !pos.see_ge(move, -margin))
                     continue;
@@ -1116,7 +1144,11 @@ moves_loop:  // When in check, search starts here
             && is_valid(ttData.value) && !is_decisive(ttData.value) && (ttData.bound & BOUND_LOWER)
             && ttData.depth >= depth - 3)
         {
-            Value singularBeta  = ttData.value - (53 + 75 * (ss->ttPv && !PvNode)) * depth / 60;
+            // smaller value triggers more extension since forced capture makes more singular positions
+            // tunable
+            Value singularBeta =
+              ttData.value
+              - ((is_capture_mandatory ? 45 : 53) + 75 * (ss->ttPv && !PvNode)) * depth / 60;
             Depth singularDepth = newDepth / 2;
 
             ss->excludedMove = move;
@@ -1133,6 +1165,10 @@ moves_loop:  // When in check, search starts here
 
                 extension =
                   1 + (value < singularBeta - doubleMargin) + (value < singularBeta - tripleMargin);
+
+                // more depth if singular and capture
+                if (is_capture_mandatory && extension > 0)
+                    extension++;
 
                 depth++;
             }
@@ -1199,6 +1235,11 @@ moves_loop:  // When in check, search starts here
         if (move == ttData.move)
             r -= 2151;
 
+        // quiet moves may not be safe, can't bank on LMR
+        if (is_capture_mandatory) {
+            r -= 400;
+        }
+
         if (capture)
             ss->statScore = 868 * int(PieceValue[pos.captured_piece()]) / 128
                           + captureHistory[movedPiece][move.to_sq()][type_of(pos.captured_piece())];
@@ -1219,7 +1260,14 @@ moves_loop:  // When in check, search starts here
             // beyond the first move depth.
             // To prevent problems when the max value is less than the min value,
             // std::clamp has been replaced by a more robust implementation.
-            Depth d = std::max(1, std::min(newDepth - r / 1024, newDepth + 2)) + PvNode;
+            // go deeper if forced capture even if LMR active
+            // tunable
+            Depth sd = std::max(1, std::min(newDepth - r / 1024, newDepth + 2));
+            // search deeper
+            if (is_capture_mandatory) {
+                sd = std::max(sd, newDepth - r/1024 + 1);
+            }
+            Depth d = sd + PvNode;
 
             ss->reduction = newDepth - d;
             value         = -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha, d, true);
@@ -1737,8 +1785,19 @@ TimePoint Search::Worker::elapsed() const {
 TimePoint Search::Worker::elapsed_time() const { return main_manager()->tm.elapsed_time(); }
 
 Value Search::Worker::evaluate(const Position& pos) {
-    return Eval::evaluate(networks[numaAccessToken], pos, accumulatorStack, refreshTable,
-                          optimism[pos.side_to_move()]);
+    Value v = Eval::evaluate(networks[numaAccessToken], pos, accumulatorStack, refreshTable,
+                             optimism[pos.side_to_move()]);
+
+    MoveList<CAPTURES> caps(pos);
+    if (caps.size() == 0)
+    {
+        v -= Value(200);
+    }
+    else
+    {
+        v += Value(5 * caps.size());
+    }
+    return v;
 }
 
 namespace {
