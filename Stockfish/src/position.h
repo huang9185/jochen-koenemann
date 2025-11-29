@@ -342,10 +342,21 @@ inline bool Position::capture_stage(Move m) const {
     return capture(m) || m.promotion_type() == QUEEN;
 }
 
+// optimized so should be a bit quicker
 inline bool Position::has_capture_moves() const {
-    for (auto move : MoveList<LEGAL>(*this))
-        if (capture_stage(move))
-            return true;
+    Bitboard targets = pieces(~side_to_move());
+
+    for (PieceType pt = PAWN; pt <= KING; ++pt)
+    {
+        Bitboard my_pieces = pieces(side_to_move(), pt);
+        while (my_pieces)
+        {
+            if (attacks_bb(pt, pop_lsb(my_pieces), pieces()) & targets)
+            {
+                return true;
+            }
+        }
+    }
     return false;
 }
 

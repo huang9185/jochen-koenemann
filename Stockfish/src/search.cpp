@@ -793,8 +793,18 @@ Value Search::Worker::search(
     bool is_capture_mandatory = pos.has_capture_moves();
 
     // deeper if has capture
-    if (is_capture_mandatory && depth < MAX_PLY - 2)
+    // tunable
+    if (!rootNode && is_capture_mandatory && depth < MAX_PLY - 2)
+    {
+        // if (depth <= 152)
+        // {
         depth++;
+        // }
+        // else if (depth <= 8 && (ss->ply & 1))
+        // {
+        //     depth++;
+        // }
+    }
 
 
     // Step 6. Static evaluation of the position
@@ -885,7 +895,7 @@ Value Search::Worker::search(
     }
 
     // Step 9. Null move search with verification search
-    // disabled cuz can lead to states that's impossible 
+    // disabled cuz can lead to states that's impossible
     if (!is_capture_mandatory && cutNode && ss->staticEval >= beta - 18 * depth + 350
         && !excludedMove && pos.non_pawn_material(us) && ss->ply >= nmpMinPly && !is_loss(beta))
     {
@@ -1059,7 +1069,7 @@ moves_loop:  // When in check, search starts here
             // Skip quiet moves if movecount exceeds our FutilityMoveCount threshold
             // need higher threshold since moves are captures, can't assume bad
             // tunable
-            if (moveCount >= (is_capture_mandatory ? (5 + depth * depth) : (3 + depth * depth))
+            if (moveCount >= (is_capture_mandatory ? (4 + depth * depth) : (3 + depth * depth))
                                / (2 - improving))
                 mp.skip_quiet_moves();
 
@@ -1236,7 +1246,8 @@ moves_loop:  // When in check, search starts here
             r -= 2151;
 
         // quiet moves may not be safe, can't bank on LMR
-        if (is_capture_mandatory) {
+        if (is_capture_mandatory)
+        {
             r -= 400;
         }
 
@@ -1264,8 +1275,9 @@ moves_loop:  // When in check, search starts here
             // tunable
             Depth sd = std::max(1, std::min(newDepth - r / 1024, newDepth + 2));
             // search deeper
-            if (is_capture_mandatory) {
-                sd = std::max(sd, newDepth - r/1024 + 1);
+            if (is_capture_mandatory)
+            {
+                sd = std::max(sd, newDepth - r / 1024 + 1);
             }
             Depth d = sd + PvNode;
 

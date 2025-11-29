@@ -220,8 +220,7 @@ int Eval::simple_eval(const Position& pos) {
     int   material_eval = PawnValue * (pos.count<PAWN>(c) - pos.count<PAWN>(~c))
                       + (pos.non_pawn_material(c) - pos.non_pawn_material(~c));
 
-    // return material_eval + hanging_penalty(pos);
-        // + forced_capture_penalty(pos);
+    // return material_eval + hanging_penalty(pos)/4 + forced_capture_penalty(pos)/4;
     return material_eval;
 }
 
@@ -264,11 +263,10 @@ Value Eval::evaluate(const Eval::NNUE::Networks&    networks,
     int v        = (nnue * (77871 + material) + optimism * (7191 + material)) / 77871;
 
     // tunable
-    v += capture_pressure(pos) / 10;
-    v += forced_capture_penalty(pos);
-    // apparently makes the engine much worse so disabled
-    // v += hanging_penalty(pos) / 3;
-    // v += forced_exchange_eval(pos)/3;
+    v += capture_pressure(pos) / 6;
+    v += forced_capture_penalty(pos) / 6;
+    v += hanging_penalty(pos) / 6;
+    // v += forced_exchange_eval(pos) / 6;
 
     // Damp down the evaluation linearly when shuffling
     // tunable, reduced since non progressive moves are less common
