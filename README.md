@@ -14,6 +14,10 @@ changes are made to Stockfish.
 To have stockfish fight against itself, run the `vs_stockfish.sh` script. For fighting against
 fairy-stockfish configured to the must-capture variant, run `vs_fairy.sh`.
 
+Note that Fairy-Stockfish is using the force-capture trained NNUE, which can be downloaded here
+https://drive.google.com/u/0/uc?id=1DxWtldVM0TSniPAKzlhAMGYHuZSqpYH7&export=download and should
+be placed in the `Fairy-Stockfish/` directory.
+
 Note the `polyglot.ini` file is in each engine's directory.
 
 ## Disclosures
