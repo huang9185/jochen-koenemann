@@ -1,2 +1,2 @@
-xboard -fcp "polyglot" -fd "./Jochen/" -scp "polyglot" -sd "./Jochen/" -tc 1 -mode TwoMachines
+xboard -fcp "polyglot" -fd "./Jochen/" -scp "polyglot" -sd "./Stockfish/" -tc 1 -mode TwoMachines
 
