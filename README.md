@@ -59,6 +59,12 @@ the command from `aplay -q` to `afplay`.
 Run the script `build.sh` to build both Fairy-Stockfish and Stockfish. Rerun the script if 
 changes are made to Stockfish.
 
+## Test with cutechess-cli
+Follow the instruction here to setup cutechess-cli: https://github.com/cutechess/cutechess under
+the current folder. Then, move `cc_test.sh` to /cutechess/build. Run the script file to play 10
+games.
+
+
 ## Fight
 To have stockfish fight against itself, run the `vs_stockfish.sh` script. For fighting against
 fairy-stockfish configured to the must-capture variant, run `vs_fairy.sh`.
@@ -68,4 +74,3 @@ https://drive.google.com/u/0/uc?id=1DxWtldVM0TSniPAKzlhAMGYHuZSqpYH7&export=down
 be placed in the `Fairy-Stockfish/` directory.
 
 Note the `polyglot.ini` file is in each engine's directory.
-
