@@ -80,7 +80,13 @@ int capture_pressure(const Position& pos) {
                 black_pressure += val;
         }
     }
-    return (pos.side_to_move() == WHITE ? 1 : -1) * black_pressure - white_pressure;
+    // From side-to-move perspective: positive => opponent under more pressure.
+    Color stm = pos.side_to_move();
+    int my_pressure  = stm == WHITE ? white_pressure : black_pressure;
+    int opp_pressure = stm == WHITE ? black_pressure : white_pressure;
+
+    // Scale down to avoid overpowering NNUE: return opp - mine (centipawns).
+    return opp_pressure - my_pressure;
 }
 
 // Adjust for opponent's capturing options

@@ -794,8 +794,7 @@ Value Search::Worker::search(
 
     // deeper if has capture
     if (is_capture_mandatory && depth < MAX_PLY - 2)
-        depth++;
-
+        depth+=0; // disable for now
 
     // Step 6. Static evaluation of the position
     Value      unadjustedStaticEval = VALUE_NONE;
@@ -859,11 +858,16 @@ Value Search::Worker::search(
         depth--;
 
     // Step 7. Razoring
-    // If eval is really low, skip search entirely and return the qsearch value.
-    // For PvNodes, we must have a guard against mates being returned.
-    // disabled since forced capture by opponent can bring value back up
-    if (!PvNode && !is_capture_mandatory && eval < alpha - 485 - 281 * depth * depth)
-        return qsearch<NonPV>(pos, ss, alpha, beta);
+    // Re-enable razoring in quiet, early-to-midgame positions where no capture is available.
+    // We keep it disabled for capture-mandatory nodes to avoid missing forced capture sequences.
+    if (!PvNode && !is_capture_mandatory) {
+        // Only razor if we are not in the very first plies (avoid root/early instability)
+        // and we have enough static eval headroom to be safe.
+        // Tunable: ply_threshold = 4, depth_scale = 1
+        const int ply_threshold = 4;
+        if (ss->ply >= ply_threshold && eval < alpha - 485 - 281 * depth * depth)
+            return qsearch<NonPV>(pos, ss, alpha, beta);
+    }
 
     // Step 8. Futility pruning: child node
     // The depth condition is important for mate finding.
@@ -1056,11 +1060,22 @@ moves_loop:  // When in check, search starts here
         // Depth conditions are important for mate finding.
         if (!rootNode && pos.non_pawn_material(us) && !is_loss(bestValue))
         {
-            // Skip quiet moves if movecount exceeds our FutilityMoveCount threshold
-            // need higher threshold since moves are captures, can't assume bad
-            // tunable
-            if (moveCount >= (is_capture_mandatory ? (5 + depth * depth) : (3 + depth * depth))
-                               / (2 - improving))
+            // Tuned skip_quiet_moves(): be more aggressive when no captures currently exist (quiet positions)
+            // and in early plies (common openings). This keeps capture-positions safe since is_capture_mandatory
+            // short-circuits the alternative branch.
+            int skip_threshold;
+            if (is_capture_mandatory) {
+                skip_threshold = (5 + depth * depth) / (2 - improving);
+            } else {
+                // Non-capture positions: be more aggressive in early plies and lower moveCount requirement.
+                // Tunables:
+                // - early_ply_bonus lowers threshold for the first N plies
+                // - base divisor increases skipping aggressiveness
+                int early_ply_bonus = ss->ply < 6 ? 2 : 0;   // more aggressive in early plies
+                int base = 2 - improving;                   // as before
+                skip_threshold = std::max(1, (3 + depth * depth - early_ply_bonus) / std::max(1, base));
+            }
+            if (moveCount >= skip_threshold)
                 mp.skip_quiet_moves();
 
             // Reduced depth of the next LMR search
@@ -1239,6 +1254,8 @@ moves_loop:  // When in check, search starts here
         if (is_capture_mandatory) {
             r -= 400;
         }
+
+        if (is_capture_mandatory && capture) r = std::max(0, r / 4);
 
         if (capture)
             ss->statScore = 868 * int(PieceValue[pos.captured_piece()]) / 128
@@ -1546,7 +1563,7 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Value alpha, Value beta)
 
     Key   posKey;
     Move  move, bestMove;
-    Value bestValue, value, futilityBase;
+    Value bestValue = VALUE_NONE, value, futilityBase;
     bool  pvHit, givesCheck, capture;
     int   moveCount;
 
@@ -1610,10 +1627,31 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Value alpha, Value beta)
         }
         else
         {
-            unadjustedStaticEval = evaluate(pos);
+            bool local_capture_mandatory = pos.has_capture_moves();
 
-            ss->staticEval = bestValue =
-              to_corrected_static_eval(unadjustedStaticEval, correctionValue);
+            // Heuristic: if quiet and early in game, avoid expensive NNUE eval.
+            const int cheap_ply_limit = 6;  // TODO: tunable
+
+            if (!local_capture_mandatory && ss->ply <= cheap_ply_limit)
+            {
+                // Cheap material/static eval only
+                unadjustedStaticEval = Eval::simple_eval(pos);
+
+                // ss->staticEval is the correct variable to set (NOT eval)
+                ss->staticEval = to_corrected_static_eval(unadjustedStaticEval, correctionValue);
+
+                ttWriter.write(posKey, VALUE_NONE, ss->ttPv, BOUND_NONE, DEPTH_UNSEARCHED,
+                            Move::none(), unadjustedStaticEval, tt.generation());
+            }
+            else
+            {
+                unadjustedStaticEval = evaluate(pos);
+
+                ss->staticEval = to_corrected_static_eval(unadjustedStaticEval, correctionValue);
+
+                ttWriter.write(posKey, VALUE_NONE, ss->ttPv, BOUND_NONE, DEPTH_UNSEARCHED,
+                            Move::none(), unadjustedStaticEval, tt.generation());
+            }
         }
 
         // Stand pat. Return immediately if static value is at least beta

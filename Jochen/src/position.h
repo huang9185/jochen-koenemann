@@ -131,6 +131,7 @@ class Position {
     bool  capture(Move m) const;
     bool  capture_stage(Move m) const;
     bool  has_capture_moves() const;
+    bool  forced_captures_only() const;
     bool  gives_check(Move m) const;
     Piece moved_piece(Move m) const;
     Piece captured_piece() const;
@@ -347,6 +348,27 @@ inline bool Position::has_capture_moves() const {
         if (capture_stage(move))
             return true;
     return false;
+}
+
+inline bool Position::forced_captures_only() const {
+    if (checkers())
+        return false;
+    
+    bool hasCapture = false;
+    bool hasQuiet = false;
+    
+    for (auto move : MoveList<LEGAL>(*this))
+    {
+        if (capture_stage(move))
+            hasCapture = true;
+        else
+            hasQuiet = true;
+        
+        if (hasCapture && hasQuiet)
+            return false;
+    }
+    
+    return hasCapture && !hasQuiet;
 }
 
 inline Piece Position::captured_piece() const { return st->capturedPiece; }
